@@ -1,0 +1,575 @@
+---
+title: "Boston Housing Median Value Prediction"
+subtitle: "BANA 7047 Data Mining II"
+author: "Straight, Kaitlyn | M17348257 | Section 001"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: flatly
+    highlight: tango
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center",
+  fig.width = 7,
+  fig.height = 5
+)
+```
+
+---
+
+# Introduction & Problem Statement
+
+The **Boston Housing dataset**, originally studied by Harrison & Rubinfeld (1978), contains 506 observations on median home values (`medv`, scaled by \$1000's) across Boston-area neighborhoods, along with 13 socioeconomic and structural predictors. The data were collected from the 1970 U.S. Census and originally compiled to study the relationship between air quality and housing prices in the Boston metropolitan area.  
+
+**Goal:** Predict median home value (`medv`) using a variety of supervised machine learning models, compare their predictive accuracy, and identify the key drivers of housing prices in the Boston area.
+
+**Predictors include:**
+
+| Variable | Description |
+|----------|-------------|
+| `crim`   | Per capita crime rate by town |
+| `zn`     | Proportion of residential land zoned for large lots |
+| `indus`  | Proportion of industrial (non-retail) business acres |
+| `chas`   | Charles River dummy (1 if property bounds river) |
+| `nox`    | Nitrogen oxide concentration (parts per 10 million) |
+| `rm`     | Average number of rooms per dwelling |
+| `age`    | Proportion of owner-occupied units built before 1940 |
+| `dis`    | Weighted distance to Boston employment centers |
+| `rad`    | Index of accessibility to radial highways |
+| `tax`    | Full-value property tax rate per \$10,000 |
+| `ptratio`| Pupil-teacher ratio by town |
+| `black`  | $1000(B_k - 0.63)^2$ where $B_k$ is proportion Black residents |
+| `lstat`  | % lower-status population |
+
+**Models Applied:** Linear Regression, Regression Tree, k-Nearest Neighbor (k-NN), Random Forests, Boosting, Generalized Additive Model (GAM), and Neural Networks.
+
+**Train/Test Split:** A random 80/20 split is used consistently throughout, with `set.seed(17348257)`.
+
+---
+
+# Data Overview & Exploratory Data Analysis
+
+```{r eda-setup}
+library(MASS)
+library(ggplot2)
+library(corrplot)
+library(dplyr)
+
+data(Boston)
+
+# Dimensions and structure
+cat("Rows:", nrow(Boston), " | Columns:", ncol(Boston), "\n")
+```
+
+```{r eda-summary}
+# Summary statistics
+summary(Boston)
+```
+
+```{r eda-hist, fig.cap="Figure 1: Distribution of Median Home Value. The response variable is right-skewed with a spike at $50K (likely a censoring cap)."}
+ggplot(Boston, aes(x = medv)) +
+  geom_histogram(bins = 40, fill = "darkblue", color = "white", alpha = 0.85) +
+  labs(title = "Distribution of Median Home Value",
+       x = "Median Home Value (medv, $1,000s)",
+       y = "Count") +
+  theme_minimal(base_size = 13)
+```
+
+```{r eda-corr, fig.cap="Figure 2: Correlation matrix of all Boston Housing variables. lstat and rm display the strongest correlations with medv."}
+corrplot(cor(Boston),
+         method  = "color",
+         type    = "upper",
+         tl.cex  = 0.8,
+         tl.col  = "black",
+         addCoef.col = "black",
+         number.cex  = 0.55,
+         col = colorRampPalette(c("red","white","darkblue"))(200))
+```
+
+```{r eda-scatter, fig.cap="Figure 3: Median Value vs. lstat and rm — the two strongest predictors. Larger lstat (lower-status population) strongly reduces home value; more rooms (rm) increases value."}
+par(mfrow = c(1, 2))
+plot(Boston$lstat, Boston$medv,
+     xlab = "% Lower Status Population (lstat)",
+     ylab = "Median Home Value ($1k)",
+     main = "medv vs. lstat",
+     pch  = 16, col = "darkblue", cex = 0.7)
+abline(lm(medv ~ lstat, data = Boston), col = "red", lwd = 2)
+
+plot(Boston$rm, Boston$medv,
+     xlab = "Avg Rooms per Dwelling (rm)",
+     ylab = "Median Home Value ($1k)",
+     main = "medv vs. rm",
+     pch  = 16, col = "#d7191caa", cex = 0.7)
+abline(lm(medv ~ rm, data = Boston), col = "blue", lwd = 2)
+par(mfrow = c(1, 1))
+```
+
+---
+
+# Train/Test Split
+
+All models use an 80/20 split.
+
+```{r split}
+set.seed(17348257)
+sample_index  <- sample(nrow(Boston), nrow(Boston) * 0.80)
+Boston_train  <- Boston[sample_index, ]
+Boston_test   <- Boston[-sample_index, ]
+
+p <- ncol(Boston) - 1  # number of predictors (13)
+
+cat("Training observations:", nrow(Boston_train),
+    "\nTesting observations: ", nrow(Boston_test))
+```
+
+---
+
+# Model 1: Linear Regression with Variable Selection
+
+**Overview:** Ordinary least squares (OLS) regression estimates a linear relationship between `medv` and the predictors. Variable selection via Stepwise AIC is used to remove predictors that do not contribute significantly (here, `age` and `indus` are removed).
+
+```{r aic variable selection and lm-fit}
+# Full model
+full_model <- lm(medv ~ ., data = Boston_train)
+
+# Stepwise selection using AIC
+step_model <- step(full_model, direction = "both")
+summary(step_model)
+
+# Fit best linear model (removing indus and age per lecture/variable selection)
+Boston.lm <- lm(medv ~ . - indus - age, data = Boston_train)
+summary(Boston.lm)
+```
+
+```{r lm-metrics}
+# In-sample ASE
+yhat_lm_train <- predict(Boston.lm, newdata = Boston_train)
+ase_lm  <- mean((Boston_train$medv - yhat_lm_train)^2)
+
+# Out-of-sample MSPE
+yhat_lm_test <- predict(Boston.lm, newdata = Boston_test)
+mspe_lm <- mean((Boston_test$medv - yhat_lm_test)^2)
+
+cat("Linear Model  |  In-sample ASE:", round(ase_lm, 2),
+    " |  Out-of-sample MSPE:", round(mspe_lm, 2), "\n")
+```
+
+```{r lm-resid, fig.cap="Figure 4: Residuals vs. Fitted for the linear model. A nonlinear pattern in the residuals suggests the true relationship may not be fully captured by a linear model."}
+plot(Boston.lm, which = 1, main = "Linear Model Error: Residuals vs. Fitted")
+```
+
+**Interpretation:** All retained predictors are significant (p < 0.05). `lstat` (negative) and `rm` (positive) have the largest effect sizes. The residual plot's LOESS trendline reveals nonlinearity, indicating that the model tends to underestimate for both low-value and high-value homes. The widening spread of residuals at higher fitted values indicates mild heteroscedasticity, violating the OLS assumption of constant error variance and suggesting the model's predictions are less reliable at the extremes. Outlier observations 372, 373, and 365 likely reflect the $50K censoring cap, producing extreme residuals where true values exceeded the recorded ceiling. Together, these patterns suggest the use of more flexible models in subsequent sections.
+
+---
+
+# Model 2: Regression Tree with Pruning
+
+**Overview:**A regression tree splits the data into groups based on yes/no cutoffs on predictor values in order to find the average median home value of each group. This process iterates to create a tree of if/then rules that carve the data into increasingly specific subgroups. Pruning the tree back to the optimal CP value prevents overfitting by removing splits that don't meaningfully improve prediction on new data.
+
+```{r tree-fit, fig.cap="Figure 5: CP plot for regression tree. The dotted line indicates the 1-SE rule; tree size of 14 to minimize cross-validated error is selected."}
+library(rpart)
+library(rpart.plot)
+
+# Grow large tree
+Boston_largetree <- rpart(medv ~ ., data = Boston_train, cp = 0.001)
+
+# CP plot to choose pruning level
+plotcp(Boston_largetree)
+```
+
+```{r tree-prune, fig.cap="Figure 6: Pruned regression tree. Splits on lstat and rm dominate, consistent with the linear model."}
+# Best CP = minimizes xerror
+best_cp <- Boston_largetree$cptable[
+  which.min(Boston_largetree$cptable[, "xerror"]), "CP"]
+
+Boston_rpart <- prune(Boston_largetree, cp = best_cp)
+prp(Boston_rpart, digits = 3, extra = 1,
+    main = paste0("Pruned Regression Tree (CP = ", round(best_cp, 4), ")"))
+```
+
+```{r tree-metrics}
+# In-sample ASE
+yhat_tree_train <- predict(Boston_rpart, newdata = Boston_train)
+ase_tree  <- mean((Boston_train$medv - yhat_tree_train)^2)
+
+# Out-of-sample MSPE
+yhat_tree_test <- predict(Boston_rpart, newdata = Boston_test)
+mspe_tree <- mean((Boston_test$medv - yhat_tree_test)^2)
+
+cat("Regression Tree  |  In-sample ASE:", round(ase_tree, 2),
+    " |  Out-of-sample MSPE:", round(mspe_tree, 2), "\n")
+```
+
+**Interpretation:** The pruned tree makes splits primarily on `lstat` and `rm`, confirming they are the most important partitioning variables. Trees are highly interpretable but can underperform ensemble methods.
+
+---
+
+# Model 3: k-Nearest Neighbor (k-NN) Regression
+
+**Overview:** k-NN predicts a new observation's response as the average of its k nearest neighbors in predictor space. Predictors are scaled to [0,1] using training-data min/max so no single variable dominates due to scale. Optimal k is chosen by minimizing RMSE on a withheld validation set.
+
+```{r knn-scale}
+library(FNN)
+
+# Scale predictors using training min/max ONLY
+train.norm <- Boston_train
+test.norm  <- Boston_test
+
+cols_x <- colnames(Boston_train)[1:p]
+for (j in cols_x) {
+  min_val <- min(Boston_train[[j]])
+  max_val <- max(Boston_train[[j]])
+  train.norm[[j]] <- (Boston_train[[j]] - min_val) / (max_val - min_val)
+  test.norm[[j]]  <- (Boston_test[[j]]  - min_val) / (max_val - min_val)
+}
+```
+
+```{r knn-optk, fig.cap="Figure 7: Validation RMSE for k = 1 to 30. The optimal k minimizes RMSE on the validation set."}
+# Split training into train2 / validation for k selection
+set.seed(17348257)
+idx2       <- sample(nrow(train.norm), nrow(train.norm) * 0.80)
+train2     <- train.norm[idx2, ]
+valid      <- train.norm[-idx2, ]
+
+RMSE_k <- data.frame(k = 1:30, RMSE = NA)
+for (i in 1:30) {
+  pred_k       <- knn.reg(train = train2[, 1:p], test = valid[, 1:p],
+                          y = train2$medv, k = i)
+  RMSE_k[i, 2] <- sqrt(mean((valid$medv - pred_k$pred)^2))
+}
+
+opt_k <- which.min(RMSE_k$RMSE)
+cat("Optimal k:", opt_k, "\n")
+
+ggplot(RMSE_k, aes(x = k, y = RMSE)) +
+  geom_line(color = "darkblue", linewidth = 1) +
+  geom_point(data = RMSE_k[opt_k, ], aes(x = k, y = RMSE),
+             color = "red", size = 3) +
+  labs(title = paste0("k-NN Validation RMSE (Optimal k = ", opt_k, ")"),
+       x = "k", y = "Validation RMSE") +
+  theme_minimal(base_size = 13)
+```
+
+```{r knn-metrics}
+# Final k-NN on full training set, predict test set
+knn_final <- knn.reg(train = train.norm[, 1:p], test = test.norm[, 1:p],
+                     y = train.norm$medv, k = opt_k)
+
+# In-sample ASE (k-NN on training set)
+knn_train <- knn.reg(train = train.norm[, 1:p], test = train.norm[, 1:p],
+                     y = train.norm$medv, k = opt_k)
+ase_knn  <- mean((train.norm$medv - knn_train$pred)^2)
+
+# Out-of-sample MSPE
+mspe_knn <- mean((Boston_test$medv - knn_final$pred)^2)
+
+cat("k-NN (k =", opt_k, ")  |  In-sample ASE:", round(ase_knn, 2),
+    " |  Out-of-sample MSPE:", round(mspe_knn, 2), "\n")
+```
+
+**Interpretation:** k-NN is a non-parametric approach that makes no assumptions about functional form. Its performance depends on proper scaling and k selection. It can struggle in high-dimensional settings but performs reasonably here with 13 predictors.
+
+---
+
+# Model 4: Random Forests
+
+**Overview:** Random forests build many independent trees by first bootstrapping the training data and considering only a random subset of predictors (`mtry`) at each split. Predictions are averaged across all trees, greatly reducing variance compared to a single tree. The default `mtry = p/3 ≈ 4` is used for regression.
+
+```{r rf-fit}
+library(randomForest)
+
+set.seed(17348257)
+boston_rf <- randomForest(medv ~ ., data = Boston_train,
+                          importance = TRUE, ntree = 500)
+boston_rf
+```
+
+```{r rf-metrics}
+# In-sample ASE
+yhat_rf_train <- predict(boston_rf, newdata = Boston_train)
+ase_rf  <- mean((Boston_train$medv - yhat_rf_train)^2)
+
+# Out-of-sample MSPE
+yhat_rf_test <- predict(boston_rf, newdata = Boston_test)
+mspe_rf <- mean((Boston_test$medv - yhat_rf_test)^2)
+
+cat("Random Forests  |  In-sample ASE:", round(ase_rf, 2),
+    " |  Out-of-sample MSPE:", round(mspe_rf, 2), "\n")
+```
+
+```{r rf-importance, fig.cap="Figure 8: Variable importance from Random Forests. %IncMSE measures how much MSPE increases when a variable is randomly shuffled. IncNodePurity measures how much each variable reduces the variance within tree nodes. Larger values indicate variables have large effects on MSE and tree nodes. lstat and rm are by far the most important predictors."}
+varImpPlot(boston_rf,
+           main = "Random Forest Variable Importance",
+           col  = "#2c7bb6", pch = 16)
+```
+
+**Interpretation:** Random Forests dramatically reduce variance over a single tree (MSPE 14.9 vs. 19.42 for Random Forest and Regression Tree, respectively). `rm` and `lstat` are confirmed as the top two predictors. `dis` (distance to employment) and `nox` (air quality) also rank highly, suggesting location and environmental factors matter substantially.
+
+---
+
+# Model 5: Boosting
+
+**Overview:** Boosting (via `gbm`) fits trees sequentially, with each iteration correcting the residual errors of the previous model. Key tuning parameters: number of trees (10,000), shrinkage/learning rate (0.01), and interaction depth (8). The model is built on training data only.
+
+```{r boost-fit}
+library(gbm)
+
+set.seed(17348257)
+boston_boost <- gbm(medv ~ .,
+                    data             = Boston_train,
+                    distribution     = "gaussian",
+                    n.trees          = 10000,
+                    shrinkage        = 0.01,
+                    interaction.depth= 8,
+                    verbose          = FALSE)
+```
+
+```{r boost-metrics}
+# In-sample ASE
+yhat_boost_train <- predict(boston_boost, newdata = Boston_train, n.trees = 10000)
+ase_boost  <- mean((Boston_train$medv - yhat_boost_train)^2)
+
+# Out-of-sample MSPE
+yhat_boost_test <- predict(boston_boost, newdata = Boston_test, n.trees = 10000)
+mspe_boost <- mean((Boston_test$medv - yhat_boost_test)^2)
+
+cat("Boosting  |  In-sample ASE:", round(ase_boost, 2),
+    " |  Out-of-sample MSPE:", round(mspe_boost, 2), "\n")
+```
+
+```{r boost-importance, fig.cap="Figure 9: Relative variable importance from Boosting (GBM). rm leads, followed by lstat, dis, and crim."}
+boost_imp <- summary(boston_boost, plotit = FALSE)
+ggplot(boost_imp[1:10, ], aes(x = reorder(var, rel.inf), y = rel.inf)) +
+  geom_bar(stat = "identity", fill = "#d7191c", alpha = 0.85) +
+  coord_flip() +
+  labs(title = "Boosting: Top 10 Variable Importance",
+       x = NULL, y = "Relative Influence (%)") +
+  theme_minimal(base_size = 13)
+```
+
+**Interpretation:** Boosting tends to achieve among the lowest MSPE values of all methods due to its iterative correction strategy. The variable importance ranking closely mirrors that of random forests, reinforcing which predictors matter most.
+
+---
+
+# Model 6: Generalized Additive Model (GAM)
+
+**Overview:** A GAM extends linear regression by allowing smooth, nonlinear functions of each predictor via splines, while maintaining additive structure and interpretability. Variables `zn` and `age` are kept linear (their smooths appeared approximately linear in exploratory fits).
+
+```{r gam-explore}
+library(mgcv)
+
+# Fit exploratory GAM with all terms smoothed
+gam_explore <- gam(medv ~ s(crim) + s(zn, k = 5) + s(indus) + chas + s(nox)
+                   + s(rm) + s(age) + s(dis) + s(rad, k = 5) + s(tax)
+                   + s(ptratio) + s(black) + s(lstat),
+                   data = Boston_train)
+
+# Plot all smooths
+par(mfrow = c(2, 3))
+plot(gam_explore, shade = TRUE, shade.col = "lightblue", seWithMean = TRUE, scale = 0)
+par(mfrow = c(1, 1))
+```
+
+```{r gam-fit}
+par(mfrow = c(1, 2))
+plot(gam_explore, select = 2,
+     shade = TRUE, shade.col = "lightblue",
+     seWithMean = TRUE, scale = 0,
+     main = "s(zn)")
+plot(gam_explore, select = 6,
+     shade = TRUE, shade.col = "lightblue",
+     seWithMean = TRUE, scale = 0,
+     main = "s(age)")
+par(mfrow = c(1, 1))
+
+Boston_gam <- gam(medv ~ s(crim) + zn + s(indus) + chas + s(nox)
+                  + s(rm) + age + s(dis) + rad + s(tax)
+                  + s(ptratio) + s(black) + s(lstat),
+                  data = Boston_train)
+summary(Boston_gam)
+```
+
+```{r gam-metrics}
+# In-sample ASE
+yhat_gam_train <- predict(Boston_gam, newdata = Boston_train)
+ase_gam  <- mean((Boston_train$medv - yhat_gam_train)^2)
+
+# Out-of-sample MSPE
+yhat_gam_test <- predict(Boston_gam, newdata = Boston_test)
+mspe_gam <- mean((Boston_test$medv - yhat_gam_test)^2)
+
+cat("GAM  |  In-sample ASE:", round(ase_gam, 2),
+    " |  Out-of-sample MSPE:", round(mspe_gam, 2), "\n")
+```
+
+```{r gam-plots, fig.cap="Figure 10: GAM partial effects for selected predictors. Curves show the nonlinear relationships between each predictor and medv, holding others constant. Note the sharp effect of lstat and the plateau-then-rise in rm.", fig.height=7, fig.width=10}
+par(mfrow = c(2, 3))
+plot(Boston_gam,
+     shade = TRUE, shade.col = "lightblue",
+     seWithMean = TRUE, scale = 0)
+par(mfrow = c(1, 1))
+```
+
+**Interpretation:** The GAM captures clear nonlinear relationships that the linear model cannot, particularly for `lstat`, `rm`, and `nox`. The smooth terms are all statistically significant, confirming that a linear model was an oversimplification. GAM maintains a strong balance between flexibility and interpretability.
+
+---
+
+# Model 7: Neural Networks
+
+**Overview:** A neural network passes inputs through hidden layers of neurons, applying weighted combinations of the predictors and nonlinear transformations in order to detect more complex patterns within the data. The network minimizes error through iteration, continually adjusting its weights via backpropogation. Scaling both predictors and the response variable `medv` to [0,1] is essential for training stability, as differences in variable scales can destabilize the weight-adjustment process.
+
+**Architecture:** Hidden layers = (5), `linear.output = TRUE` for regression.
+
+```{r nn-setup}
+library(neuralnet)
+
+# Scaling: use training min/max only
+train_maxs <- apply(Boston_train, 2, max)
+train_mins <- apply(Boston_train, 2, min)
+
+train_sc <- as.data.frame(scale(Boston_train,
+                                center = train_mins,
+                                scale  = train_maxs - train_mins))
+test_sc  <- as.data.frame(scale(Boston_test,
+                                center = train_mins,
+                                scale  = train_maxs - train_mins))
+```
+
+```{r nn-scaled, results='hide'}
+set.seed(17348257)
+nn_scaled <- neuralnet(medv ~ .,
+                       data          = train_sc,
+                       hidden        = 5,
+                       linear.output = TRUE,
+                       stepmax       = 1e7)
+```
+
+```{r nn-metrics}
+# --- Scaled model metrics ---
+# In-sample ASE (rescale back to original units)
+sc_pred_train <- nn_scaled$net.result[[1]]
+unsc_pred_train <- sc_pred_train * (train_maxs["medv"] - train_mins["medv"]) + train_mins["medv"]
+ase_nn <- mean((Boston_train$medv - unsc_pred_train)^2)
+
+# Out-of-sample MSPE
+comp_sc   <- compute(nn_scaled, test_sc[, 1:p])
+unsc_pred_test <- comp_sc$net.result * (train_maxs["medv"] - train_mins["medv"]) + train_mins["medv"]
+mspe_nn <- mean((Boston_test$medv - unsc_pred_test)^2)
+
+cat("Neural Network (scaled, hidden=5)  |  In-sample ASE:", round(ase_nn, 2),
+    " |  Out-of-sample MSPE:", round(mspe_nn, 2), "\n")
+```
+
+```{r nn-plot, fig.cap="Figure 11: Neural network architecture diagram (scaled model, 1 hidden layer with 5 nodes). Each connection has a learned weight; the network transforms the 13 inputs through the hidden layer to predict medv."}
+plot(nn_scaled, rep = "best")
+```
+
+**Interpretation:** The scaled model achieves a substantially lower MSPE value. Neural networks are highly flexible but act as a "black box" with limited interpretability due to the complexity of the hidden layers compared to linear or GAM models.
+
+---
+
+# Model Comparison Summary
+
+## Summary Table
+
+*Table 1: In-sample Average Squared Error (ASE) and out-of-sample Mean Squared Prediction Error (MSPE) for all models. A random 80/20 train/test split is used with `set.seed(17348257)`.*
+
+```{r summary-table}
+library(knitr)
+
+results_df <- data.frame(
+  Model = c(
+    "Linear Regression (no indus, age)",
+    "Regression Tree (pruned)",
+    paste0("k-NN (k = ", opt_k, ", scaled X)"),
+    "Random Forests (mtry ≈ 4)",
+    "Boosting (n=10000, λ=0.01, d=8)",
+    "GAM (mixed smooth/linear terms)",
+    "Neural Network (scaled X&Y, hidden=5)"
+  ),
+  `ASE` = round(c(ase_lm, ase_tree, ase_knn,
+                             ase_rf, ase_boost, ase_gam, ase_nn), 2),
+  `MSPE` = round(c(mspe_lm, mspe_tree, mspe_knn,
+                                  mspe_rf, mspe_boost, mspe_gam, mspe_nn), 2)
+)
+
+kable(results_df,
+      col.names = c("Model", "In-Sample ASE", "Out-of-Sample MSPE"),
+      align = c("l","c","c"),
+      caption = "Table 1: Model Comparison — ASE (in-sample) and MSPE (out-of-sample). Random seed = 17348257, 80% training / 20% testing.")
+```
+
+## MSPE Comparison Plot
+
+```{r mspe-plot, fig.cap="Figure 12: Out-of-sample MSPE for all seven models, where lower MSPE signifies better predictive power for new data. The Neural Network model has the lowest MSPE, and is therefore the best predictive model. Ensemble methods (Boosting, Random Forests) and the GAM consistently outperform the linear model and single regression tree."}
+results_df$Model <- factor(results_df$Model, levels = rev(results_df$Model))
+
+ggplot(results_df, aes(x = Model, y = MSPE, fill = MSPE)) +
+  geom_bar(stat = "identity", width = 0.7, alpha = 0.9) +
+  scale_fill_gradient(low = "blue3", high = "#d7191c") +
+  coord_flip() +
+  labs(title = "Out-of-Sample MSPE by Model",
+       x = NULL, y = "MSPE (lower is better)") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none")
+```
+
+---
+
+# Recommendations
+
+Based on the model comparison and variable importance analyses, the following recommendations are made:
+
+**1. Best Predictive Model:** The Neural Networks Model achieves the lowest Out-of-Sample MSPE, making it the top choice for prediction accuracy. Neural networks tend to be computationally expensive, so Boosting and Random Forest ensemble methods are good alternates, balancing accuracy and computational cost.
+
+**2. Best Interpretable Model:** The GAM provides the best balance of flexibility and interpretability. Its smooth partial-effect plots clearly communicate how each predictor affects home `medv`, which can be valuable for actionable insights.
+
+**3. Key Drivers of Median Home Value:**
+
+
+- **`rm` (average rooms per dwelling):** Consistently the #1 predictor across all models. More rooms = higher value, reflecting size and quality of housing stock.
+- **`lstat` (% lower-status population):** The second most important predictor. Larger lower-status population share strongly decreases home value. This likely reflects socioeconomic concentration effects.
+- **`dis` (distance to employment centers):** Negatively associated with value at short distances, neighborhoods closer to employment centers tend to have higher value, reflecting the premium of urban accessibility. 
+- **`nox` (air pollution):** A consistent top-5 predictor. Higher pollution is associated with lower home values. This finding is consistent with the hedonic pricing literature (Harrison & Rubinfeld, 1978), which motivated the dataset's original creation.
+- **`ptratio` (pupil-teacher ratio):** Higher ratios (more students-to-staff in schools) reduce home values. This finding is a well-documented relationship in housing economics.
+
+**4. Policy Implications:**
+
+- Investments in improving school quality (`ptratio`), reducing crime (`crim`), improving air quality (`nox`) could have meaningful positive effects on neighborhood home values.
+- The nonlinear effects revealed by the GAM suggest that policy effects are not uniform. For example, the benefit of additional rooms (`rm`) plateaus at high values.
+
+**5. Model Recommendation for Practice:** For real estate valuation or policy analysis, we recommend the **GAM** for its interpretability, or **Boosting** when maximum predictive accuracy is required.
+
+---
+
+# Discussion & Literature Comparison
+
+The Boston Housing dataset has been extensively studied since Harrison & Rubinfeld (1978) first used it to estimate the willingness to pay for clean air using hedonic pricing methods. Their original OLS analysis identified `nox`, `rm`, `dis`, and `lstat` as key determinants—findings that align with our results.
+
+**Comparison with existing work:**
+
+- Pace & Gilley (1997) applied a method that accounted for the spatial dependence of observations and found that it improved predictions substantially. Neighboring homes share similarities that standard models cannot capture. The absence of any geographic components in our non-spatial models is a notable limitation of this analysis.
+- Grills (2023) applied nonparametric and spatial regression models to the Boston Housing dataset and found that spatially-aware models consistently outperformed standard regression on MSPE. This analysis further highlights the limitation of our analysis, as none of our seven models explicitly account for the geographic relationships between neighboring observations.
+- Belsley, Kuh & Welsch (1980) highlighted multicollinearity issues (between `tax`, `rad`, and `indus`) which may explain why variable selection removes `indus` in our linear model without much loss of fit.
+
+- Recent deep learning applications (e.g. multi-layer neural networks) have reported MSPE values below 10 on this dataset, suggesting our single-hidden-layer network has room for improvement.
+- Kaggle competitions using the Boston dataset frequently report MSPE values in the range of 8–15 for tree-based ensemble methods, consistent with our Random Forest and Boosting results.
+**Dataset limitations:** The dataset reflects 1970s Boston and contains a variable (`black`) that raises ethical concerns in modern analysis. Additionally, the censoring of `medv` at $50K artificially distorts the upper tail of predictions.
+
+**References:**
+
+- Harrison, D. & Rubinfeld, D. (1978). Hedonic Housing Prices and the Demand for Clean Air. *Journal of Environmental Economics and Management*, 5(1), 81–102.
+- Pace, R.K. & Gilley, O.W. (1997). Using the Spatial Configuration of the Data to Improve Estimation. *Journal of Real Estate Finance and Economics*, 14, 333–340.
+- Grills, N. (2023). A comparative study of nonparametric spatial models. Master's Report, Department of Statistics, Kansas State University.
+- Belsley, D.A., Kuh, E. & Welsch, R.E. (1980). *Regression Diagnostics: Identifying Influential Data and Sources of Collinearity*. Wiley.
+
+
