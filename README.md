@@ -10,10 +10,10 @@ Models Compared:
 - Generalized Additive Model (GAM with mixed smooth/linear terms)
 - Neural Network (single hidden layer, 5 nodes, scaled inputs)
 
-Key Findings:
-Neural Networks, Boosting, and Random Forests achieved the lowest out-of-sample prediction error.
-lstat (% lower-status population) and rm (average rooms per dwelling) were the strongest predictors across all models.
-GAM revealed significant nonlinear relationships that the linear model could not capture.
+Key Findings:     
+Neural Networks, Boosting, and Random Forests achieved the lowest out-of-sample prediction error.    
+lstat (% lower-status population) and rm (average rooms per dwelling) were the strongest predictors across all models.    
+GAM revealed significant nonlinear relationships that the linear model could not capture.    
 The dataset's $50K censoring cap on home values creates a known artifact in the upper tail of predictions.
 
 Tools
