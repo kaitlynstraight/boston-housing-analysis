@@ -1,4 +1,4 @@
-# boston-housing-analysis
+# Boston Housing Price Analysis
 A supervised machine learning case study predicting median home values in the Boston area. Dataset from Harrison & Rubinfeld (1978) contains 506 observations, 13 socioeconomic and structural predictors.
 
 Models Compared:
